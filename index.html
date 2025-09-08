@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FFmpeg.js + Canvas Frame Processor (Static HTML / GitHub Pages)</title>
+  <style>
+    :root { --bg:#0b1020; --fg:#e8eefc; --muted:#9fb0d6; --accent:#7aa2ff; --card:#12182e; --ok:#2ecc71; --warn:#f1c40f; --bad:#e74c3c }
+    html,body { height:100%; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji'; color:var(--fg); background:linear-gradient(180deg,#0b1020,#0b1020 40%,#0e1430 100%); }
+    h1 { font-weight:700; letter-spacing:.3px; margin: 16px 0 6px; }
+    h2 { font-size: 1rem; font-weight:600; color:var(--muted); margin:4px 0 12px; }
+    .container { max-width:1100px; margin: 24px auto; padding: 0 16px; }
+    .row { display:grid; grid-template-columns: 1.1fr .9fr; gap:16px; }
+    .card { background:var(--card); border:1px solid #1c2242; border-radius:14px; padding:14px; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+    .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .controls > * { margin:2px 0; }
+    label { font-size:.9rem; color:var(--muted); }
+    input[type="number"] { width:88px; }
+    input[type="text"] { width:160px; }
+    input, select, button { background:#0a0f22; color:var(--fg); border:1px solid #2b335c; border-radius:10px; padding:8px 10px; }
+    button { cursor:pointer; }
+    button[disabled] { opacity:.5; cursor:not-allowed; }
+    .drop { border:2px dashed #3a447a; border-radius:14px; padding:22px; text-align:center; color:var(--muted); }
+    .drop.dragover { background:#0f1531; border-color:var(--accent); color:#cfe0ff; }
+    .log { height:260px; overflow:auto; background:#0a0f22; border-radius:10px; padding:10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size:.9rem; white-space:pre-wrap; border:1px solid #27305f; }
+    .progress { height:10px; background:#1a2142; border-radius:10px; overflow:hidden; border:1px solid #2b335c; }
+    .bar { height:100%; width:0%; background: linear-gradient(90deg, #6da3ff, #8cb6ff); transition: width .2s ease; }
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:#10183a; border:1px solid #283160; color:#cbd7ff; font-size:.85rem; }
+    .row-2 { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    canvas { width:100%; height:auto; background:#000; border-radius:12px; border:1px solid #283160; }
+    .hint { font-size:.9rem; color:#b5c4ef; }
+    .muted { color:var(--muted); }
+    .small { font-size:.85rem }
+    .footer { margin-top:12px; font-size:.85rem; color:var(--muted); }
+    a.button { text-decoration:none; padding:8px 12px; background:#10204a; border:1px solid #314a8a; border-radius:10px; color:#cfe0ff; display:inline-block }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>FFmpeg.js + Canvas Frame Processor</h1>
+    <h2>Static HTML demo for extracting frames, processing them on &lt;canvas&gt;, and rebuilding an MP4 (client‑side)</h2>
+
+    <div class="row">
+      <div class="card">
+        <div class="controls" style="margin-bottom:10px">
+          <button id="btnLoad">1) Load FFmpeg</button>
+          <span class="pill" id="ffmpegState">FFmpeg: not loaded</span>
+        </div>
+
+        <div class="card" style="background:#0c1230; border:1px dashed #34407c;">
+          <div id="drop" class="drop">
+            <div><strong>2) Drop an MP4 here</strong> or <label class="pill" style="cursor:pointer">browse <input id="file" type="file" accept="video/mp4,video/*" hidden></label></div>
+            <div class="small muted" style="margin-top:6px">No upload — everything stays in your browser memory. For large videos, set a low FPS and Max Frames below.</div>
+          </div>
+          <div class="hint" id="fileInfo" style="margin-top:8px"></div>
+        </div>
+
+        <div class="controls" style="margin-top:10px">
+          <label>FPS for extraction <input type="number" id="fps" min="1" max="60" value="5"></label>
+          <label>Max frames to process <input type="number" id="maxFrames" min="1" max="99999" value="60"></label>
+          <button id="btnExtract" disabled>3) Extract Frames → PNG</button>
+        </div>
+
+        <div class="controls" style="margin-top:6px">
+          <label>Canvas filter
+            <select id="filter">
+              <option value="grayscale">Grayscale</option>
+              <option value="invert">Invert</option>
+              <option value="blur">Blur (2px)</option>
+              <option value="text">Watermark Text</option>
+            </select>
+          </label>
+          <input id="watermark" type="text" placeholder="Watermark text" value="Demo" />
+          <button id="btnProcess" disabled>4) Process Frames on Canvas</button>
+        </div>
+
+        <div class="controls" style="margin-top:6px">
+          <button id="btnAssemble" disabled>5) Assemble → MP4</button>
+          <a id="download" class="button" style="display:none" download="output.mp4">Download output.mp4</a>
+          <button id="btnReset" class="muted" style="margin-left:auto">Reset</button>
+        </div>
+
+        <div class="progress" style="margin:12px 0 6px">
+          <div class="bar" id="bar"></div>
+        </div>
+        <div class="log" id="log" aria-live="polite" aria-atomic="false"></div>
+        <div class="footer small">Tip: keep <em>FPS</em> and <em>Max frames</em> conservative for testing. Reassembling uses <code>libx264</code> and <code>yuv420p</code> for broad compatibility.</div>
+      </div>
+
+      <div class="card">
+        <div class="row-2">
+          <div>
+            <h3 class="muted" style="margin:6px 0 8px">Preview (original)</h3>
+            <canvas id="canvasIn" width="640" height="360"></canvas>
+          </div>
+          <div>
+            <h3 class="muted" style="margin:6px 0 8px">Preview (processed)</h3>
+            <canvas id="canvasOut" width="640" height="360"></canvas>
+          </div>
+        </div>
+        <div class="small footer">The preview shows the first extracted frame before and after your selected canvas filter. Processing applies to all frames up to <em>Max frames</em>.</div>
+      </div>
+    </div>
+
+    <div class="footer small" style="margin-top:14px">
+      Notes:
+      <ul>
+        <li>This demo uses a single‑threaded FFmpeg WASM build for maximum compatibility on static hosts like GitHub Pages. It may be slow for big files.</li>
+        <li>Very large videos can exceed browser memory. If you hit errors, reduce FPS and Max frames, or segment your video.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- FIXED: Loading the main library from the jsDelivr CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js"></script>
+  
+  <script>
+  (function(){
+    const logEl = document.getElementById('log');
+    const barEl = document.getElementById('bar');
+    const stateEl = document.getElementById('ffmpegState');
+    const fileInput = document.getElementById('file');
+    const drop = document.getElementById('drop');
+    const fileInfo = document.getElementById('fileInfo');
+   
+    const btnLoad = document.getElementById('btnLoad');
+    const btnExtract = document.getElementById('btnExtract');
+    const btnProcess = document.getElementById('btnProcess');
+    const btnAssemble = document.getElementById('btnAssemble');
+    const btnReset = document.getElementById('btnReset');
+    const downloadA = document.getElementById('download');
+   
+    const fpsIn = document.getElementById('fps');
+    const maxFramesIn = document.getElementById('maxFrames');
+    const filterSel = document.getElementById('filter');
+    const watermarkIn = document.getElementById('watermark');
+   
+    const canvasIn = document.getElementById('canvasIn');
+    const canvasOut = document.getElementById('canvasOut');
+    const ctxIn = canvasIn.getContext('2d');
+    const ctxOut = canvasOut.getContext('2d');
+
+    // ------- utils -------
+    function uiLog(msg){ logEl.textContent += msg + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+    function setProgress(r){ const pct = Math.max(0, Math.min(100, Math.round((r||0)*100))); barEl.style.width = pct + '%'; }
+    function human(n){ if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB'; if(n<1073741824)return (n/1048576).toFixed(1)+' MB'; return (n/1073741824).toFixed(2)+' GB'; }
+    const isFrame = n => n && /^frame_[0-9]{5}[.]png$/.test(n);
+    const isProc  = n => n && /^proc_[0-9]{5}[.]png$/.test(n);
+
+    function getFFmpegClass(){ 
+      const ns = window.FFmpeg; 
+      return ns && (ns.FFmpeg || ns) || null; 
+    }
+    
+    // FIXED: Using jsDelivr CDN paths for the core files.
+    const CORE_VER = '0.12.6';
+    const CORE_ST = `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VER}/dist/umd`;
+    const CORE_MT = `https://cdn.jsdelivr.net/npm/@ffmpeg/core-mt@${CORE_VER}/dist/umd`;
+
+    let ffmpeg = null; let selectedFile = null; let frameNames = []; let outURL = null;
+   
+    async function toBlobURL(url, mime){ const res = await fetch(url); if(!res.ok) throw new Error('fetch '+url+' '+res.status); const buf = await res.arrayBuffer(); return URL.createObjectURL(new Blob([buf], { type: mime })); }
+    async function fetchFileLocal(x){ if (x instanceof File || x instanceof Blob) return new Uint8Array(await x.arrayBuffer()); const res = await fetch(x); return new Uint8Array(await res.arrayBuffer()); }
+
+    // ------- wiring -------
+    btnLoad.addEventListener('click', async () => {
+      uiLog('Load clicked');
+      try {
+        const FFmpegClass = getFFmpegClass();
+        if (!FFmpegClass) {
+          uiLog('FFmpeg UMD library not found. It might be blocked by an ad-blocker or network policy.');
+          stateEl.textContent='FFmpeg: script missing';
+          return;
+        }
+
+        ffmpeg = new FFmpegClass();
+        ffmpeg.on('log', ({message}) => { if(message) uiLog(message); });
+        ffmpeg.on('progress', ({progress}) => setProgress(progress));
+
+        const useMT = (typeof SharedArrayBuffer === 'function' && self.crossOriginIsolated);
+        const base = useMT ? CORE_MT : CORE_ST;
+        stateEl.textContent='FFmpeg: loading…'; btnLoad.disabled=true;
+        uiLog((useMT?'Multi-threaded':'Single-threaded')+' core @ '+base);
+
+        const coreURL = await toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript');
+        const wasmURL = await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm');
+        const workerURL = useMT ? await toBlobURL(`${base}/ffmpeg-core.worker.js`, 'text/javascript') : undefined;
+        await ffmpeg.load({ coreURL, wasmURL, workerURL });
+
+        stateEl.textContent='FFmpeg: loaded'; stateEl.style.background = '#0f1a3e';
+        uiLog('FFmpeg WASM loaded.');
+        btnExtract.disabled = !selectedFile;
+      } catch(e) {
+        uiLog('Error loading FFmpeg: '+(e && e.message ? e.message : e));
+        btnLoad.disabled=false;
+        stateEl.textContent='FFmpeg: failed';
+      }
+    });
+   
+    fileInput.addEventListener('change',()=>{ if(fileInput.files&&fileInput.files[0]) handleFile(fileInput.files[0]); });
+    drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('dragover');});
+    drop.addEventListener('dragleave',()=>drop.classList.remove('dragover'));
+    drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('dragover');const f=e.dataTransfer.files&&e.dataTransfer.files[0]; if(f) handleFile(f);});
+   
+    function handleFile(file){
+      selectedFile=file;
+      fileInfo.textContent=`Selected: ${file.name} — ${human(file.size)}`;
+      uiLog(`Selected: ${file.name}`);
+      frameNames=[];
+      downloadA.style.display='none';
+      if(outURL)URL.revokeObjectURL(outURL);
+      btnExtract.disabled = !(ffmpeg && ffmpeg.loaded);
+    }
+   
+    btnExtract.addEventListener('click',async()=>{
+      if(!selectedFile) return alert('Pick a video');
+      if(!ffmpeg || !ffmpeg.loaded) return alert('Load FFmpeg first');
+      btnExtract.disabled=btnProcess.disabled=btnAssemble.disabled=true; setProgress(0);
+      uiLog('Writing in.mp4…');
+      await ffmpeg.writeFile('in.mp4', await fetchFileLocal(selectedFile));
+      const fps=Number(fpsIn.value)||5;
+      uiLog(`Extract @ ${fps}fps`);
+      await ffmpeg.exec(['-i','in.mp4','-vf',`fps=${fps}`,'frame_%05d.png']);
+      const ls=await ffmpeg.listDir('/');
+      frameNames=ls.map(x=>x.name||x).filter(isFrame);
+      uiLog(`Frames: ${frameNames.length}`);
+      if(frameNames.length){const d=await ffmpeg.readFile(frameNames[0]);draw(ctxIn,d);} else {uiLog('No frames found — check regex / naming.');}
+      btnProcess.disabled = frameNames.length===0;
+      btnExtract.disabled=false;
+    });
+   
+    btnProcess.addEventListener('click',async()=>{
+      if(!ffmpeg || !ffmpeg.loaded) return alert('Load FFmpeg first');
+      btnProcess.disabled=btnAssemble.disabled=true; setProgress(0);
+      const limit=Math.min(frameNames.length,Number(maxFramesIn.value)||60);
+      uiLog(`Process ${limit}`);
+      for(let i=0;i<limit;i++){
+        const n=frameNames[i];
+        const d=await ffmpeg.readFile(n);
+        const blob=await processWithCanvas(d,filterSel.value,watermarkIn.value);
+        const u8=new Uint8Array(await blob.arrayBuffer());
+        const out='proc_'+n.slice(6);
+        await ffmpeg.writeFile(out,u8);
+        if(i===0)draw(ctxOut,u8);
+        setProgress((i+1)/limit);
+      }
+      uiLog('Done processing');btnAssemble.disabled=false;btnProcess.disabled=false;
+    });
+   
+    btnAssemble.addEventListener('click',async()=>{
+      if(!ffmpeg || !ffmpeg.loaded) return alert('Load FFmpeg first');
+      btnAssemble.disabled=true;setProgress(0);
+      const fps=Number(fpsIn.value)||5;
+      const ls=await ffmpeg.listDir('/'); const has=ls.map(x=>x.name||x).some(isProc);
+      uiLog(`Assemble from ${has?'proc':'frame'}`);
+      await ffmpeg.exec(['-framerate',String(fps),'-i',has?'proc_%05d.png':'frame_%05d.png','-c:v','libx264','-pix_fmt','yuv420p','out.mp4']);
+      const o=await ffmpeg.readFile('out.mp4');
+      outURL=URL.createObjectURL(new Blob([o.buffer],{type:'video/mp4'}));
+      downloadA.href=outURL;downloadA.style.display='inline-block';
+      uiLog('Ready');
+      btnAssemble.disabled=false;
+    });
+   
+    btnReset.addEventListener('click',async()=>{
+      try{
+        if(ffmpeg){const ls=await ffmpeg.listDir('/');for(const x of ls)if(x.name){await ffmpeg.deleteFile(x.name);} }
+      }catch{}
+      frameNames=[];selectedFile=null;fileInfo.textContent='';logEl.textContent='';setProgress(0);
+      ctxIn.clearRect(0,0,canvasIn.width,canvasIn.height);
+      ctxOut.clearRect(0,0,canvasOut.width,canvasOut.height);
+      if(outURL)URL.revokeObjectURL(outURL);downloadA.style.display='none';
+      uiLog('Reset');
+    });
+   
+    async function draw(ctx,b){
+      const url=URL.createObjectURL(new Blob([b.buffer||b],{type:'image/png'}));
+      const im=new Image();
+      im.onload=()=>{const s=Math.min(ctx.canvas.width/im.width,ctx.canvas.height/im.height),w=im.width*s,h=im.height*s,x=(ctx.canvas.width-w)/2,y=(ctx.canvas.height-h)/2;ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);ctx.drawImage(im,x,y,w,h);URL.revokeObjectURL(url);};
+      im.src=url;
+    }
+    async function processWithCanvas(b,m,t){
+      const url=URL.createObjectURL(new Blob([b.buffer||b],{type:'image/png'}));
+      const im=new Image();
+      await new Promise(r=>{im.onload=r;im.src=url});
+      const c=document.createElement('canvas');c.width=im.width;c.height=im.height;const cx=c.getContext('2d');
+      if(m==='blur')cx.filter='blur(2px)';
+      cx.drawImage(im,0,0);
+      if(m==='grayscale'||m==='invert'){
+        const d=cx.getImageData(0,0,c.width,c.height),p=d.data;
+        if(m==='grayscale'){
+          for(let i=0;i<p.length;i+=4){const y=(0.2126*p[i]+0.7152*p[i+1]+0.0722*p[i+2])|0;p[i]=p[i+1]=p[i+2]=y;}
+        }else{
+          for(let i=0;i<p.length;i+=4){p[i]=255-p[i];p[i+1]=255-p[i+1];p[i+2]=255-p[i+2];}
+        }
+        cx.putImageData(d,0,0);
+      }
+      if(m==='text'){
+        cx.font=Math.max(16,c.width*0.04)+'px sans-serif';
+        cx.fillStyle='rgba(255,255,255,0.85)';
+        cx.strokeStyle='rgba(0,0,0,0.6)';
+        cx.lineWidth=c.width*0.004;
+        const pad=c.width*0.02,text=t||'Demo',w=cx.measureText(text).width,x=c.width-w-pad,y=c.height-pad;
+        cx.strokeText(text,x,y);cx.fillText(text,x,y);
+      }
+      URL.revokeObjectURL(url);
+      return await new Promise(r=>c.toBlob(r,'image/png'));
+    }
+  })();
+  </script>
+
+</body>
+</html>
